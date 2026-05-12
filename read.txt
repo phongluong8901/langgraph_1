@@ -16,7 +16,7 @@ git commit -m ""
 # 1. Xóa cái 'origin' cũ đang trỏ sang nhà người ta
 git remote remove origin
 # 2. Thêm lại 'origin' trỏ thẳng về repo của bạn
-git remote add origin https://github.com/phongluong8901/langchain_1.git
+git remote add origin https://github.com/phongluong8901/langgraph_1.git
 
 git checkout -b reflection-agent
 git branch
