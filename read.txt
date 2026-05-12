@@ -1,0 +1,33 @@
+#--- docs
+-- course
+https://github.com/emarco177/langgraph-course/tree/main
+
+#--- install
+poetry init
+
+poetry add python-dotenv black isort langchain langchain-google-genai langgraph
+#--- run
+
+
+#--- git 
+git add .
+git commit -m ""
+
+# 1. Xóa cái 'origin' cũ đang trỏ sang nhà người ta
+git remote remove origin
+# 2. Thêm lại 'origin' trỏ thẳng về repo của bạn
+git remote add origin https://github.com/phongluong8901/langchain_1.git
+
+git checkout -b reflection-agent
+git branch
+git push -u origin reflection-agent
+
+#---gemini ai
+from langchain_google_genai import ChatGoogleGenerativeAI
+llm = ChatGoogleGenerativeAI(model="models/gemini-3.1-flash-lite", temperature=0)
+
+from langchain_ollama import ChatOllama
+llm = ChatOllama(
+    model="qwen3:1.7b", 
+    temperature=0 # Set bằng 0 để câu trả lời mang tính kỹ thuật, chính xác, ít "bay bổng"
+)
