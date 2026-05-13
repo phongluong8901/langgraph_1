@@ -12,7 +12,8 @@ dependencies = [
     "isort (>=8.0.1,<9.0.0)",
     "langchain (>=1.2.18,<2.0.0)",
     "langchain-google-genai (>=4.2.2,<5.0.0)",
-    "langgraph (>=1.2.0,<2.0.0)"
+    "langgraph (>=1.2.0,<2.0.0)",
+    "grandalf (>=0.8,<0.9)"
 ]
 
 

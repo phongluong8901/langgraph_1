@@ -6,8 +6,11 @@ https://github.com/emarco177/langgraph-course/tree/main
 poetry init
 
 poetry add python-dotenv black isort langchain langchain-google-genai langgraph
-#--- run
+pip install langchain-google-genai
+poetry add grandalf
 
+#--- run
+poetry run python main.py
 
 #--- git 
 git add .
@@ -31,3 +34,5 @@ llm = ChatOllama(
     model="qwen3:1.7b", 
     temperature=0 # Set bằng 0 để câu trả lời mang tính kỹ thuật, chính xác, ít "bay bổng"
 )
+
+#---
