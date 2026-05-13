@@ -148,9 +148,9 @@ git remote remove origin
 # 2. Thêm lại 'origin' trỏ thẳng về repo của bạn
 git remote add origin https://github.com/phongluong8901/langgraph_1.git
 
-git checkout -b memory-sqlite
+git checkout -b async
 git branch
-git push -u origin memory-sqlite
+git push -u origin async
 
 #---gemini ai
 from langchain_google_genai import ChatGoogleGenerativeAI
