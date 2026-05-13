@@ -1,0 +1,165 @@
+#--- docs
+--
+1. Luồng làm việc (Workflow)
+Quy trình diễn ra theo 4 giai đoạn chính:
+
+Giai đoạn 1: Chạy tự động (START -> Step 1)
+
+Graph bắt đầu chạy từ node START đến step_1.
+
+Sau khi xong step_1, nó định tiến vào node human_feedback.
+
+Giai đoạn 2: Điểm ngắt (Interrupt)
+
+Do bạn cấu hình interrupt_before=["human_feedback"], Graph sẽ "phanh gấp" ngay trước khi node này kịp chạy.
+
+Tại thời điểm này, toàn bộ trạng thái (State) gồm biến input sẽ được "đóng gói" và lưu vào database SQLite. Chương trình dừng thực thi tại đây.
+
+Giai đoạn 3: Can thiệp thủ công (Update State)
+
+Lúc này, bạn (con người) dùng lệnh graph.update_state. Việc này giống như bạn mở sổ ghi chép của máy ra và viết thêm giá trị vào cột user_feedback.
+
+Hệ thống ghi nhận là node human_feedback đã được xử lý xong bởi con người.
+
+Giai đoạn 4: Tiếp tục (Resume -> Step 3 -> END)
+
+Khi bạn gọi graph.stream(None, ...), Graph sẽ vào SQLite, tìm lại đúng thread_id="unique_session_001", khôi phục dữ liệu và chạy tiếp các bước còn lại (step_3) cho đến khi gặp END.
+
+--
+Khi bạn dùng SqliteSaver, thư viện sẽ tự động tạo ra một file database (ví dụ: checkpoints.sqlite). Trong đó lưu các thông tin cực kỳ quan trọng sau:
+
+Checkpoints (Điểm kiểm soát): Đây là bản chụp (snapshot) của toàn bộ dữ liệu trong State tại mỗi bước. Nó lưu giá trị của input và user_feedback.
+
+Threads (Luồng): Nó lưu thread_id. Điều này cho phép bạn quản lý hàng ngàn người dùng cùng lúc. Mỗi người dùng là một thread_id riêng biệt và không ai lẫn vào ai.
+
+Versions/History: SQLite lưu lại lịch sử thay đổi của State. Bạn thậm chí có thể "du hành thời gian" quay lại phiên bản State trước đó nếu muốn.
+
+Next Steps: Nó lưu thông tin về việc node nào là node tiếp theo cần phải chạy sau khi được kích hoạt lại.
+
+
+-- core
+-- async 1: chua async
+Đúng vậy, đây chính là mô hình chạy song song (parallelism) và có tính chất asynchronous (bất đồng bộ) về mặt logic trong LangGraph.
+
+Mặc dù trong code bạn thấy các hàm __call__ là hàm thông thường (def chứ không phải async def), nhưng cách LangGraph vận hành các Node trong sơ đồ này mô phỏng hoàn hảo quy trình xử lý bất đồng bộ.
+
+1. Tại sao gọi đây là chạy Async/Parallel?
+Trong một đồ thị thông thường (Sequential), các bước chạy theo hàng dọc: A -> B -> C. Nhưng trong đồ thị của bạn:
+
+Sự phân nhánh (Fan-out): Từ node a, luồng đi rẽ làm hai hướng cùng lúc: một hướng tới b và một hướng tới c.
+
+Thực thi song song: LangGraph nhận thấy b và c không phụ thuộc lẫn nhau. Do đó, nó sẽ cố gắng thực thi chúng cùng một lúc (nếu bạn dùng phiên bản async của LangGraph hoặc chạy trong môi trường hỗ trợ, chúng sẽ chạy trên các luồng khác nhau).
+
+Điểm đợi (Synchronization/Join): Node d đóng vai trò là một "rào chắn". Nó sẽ đợi cho đến khi cả hai nhánh (nhánh phía b2 và nhánh phía c) gửi kết quả về thì mới bắt đầu chạy.
+
+2. Giải thích cơ chế "Gộp dữ liệu" (Reducer)
+Đây là phần quan trọng nhất để cơ chế chạy song song không làm hỏng dữ liệu:
+
+Vấn đề: Nếu b2 và c cùng hoàn thành một lúc và cùng ghi đè vào biến aggregate, giá trị của node nào xong sau sẽ xóa mất kết quả của node trước.
+
+Giải pháp (operator.add): Nhờ có Annotated[list, operator.add], LangGraph không thực hiện phép gán (=) mà thực hiện phép cộng dồn (+=).
+
+a xong -> aggregate = ["I'm A"]
+
+b2 xong -> aggregate = ["I'm A", "I'm B", "I'm B2"]
+
+c xong -> aggregate = ["I'm A", "I'm B", "I'm B2", "I'm C"] (Thứ tự có thể thay đổi tùy node nào xong trước).
+
+3. Code của bạn chạy như thế nào trong thực tế?
+Khi bạn chạy graph.invoke, tiến trình sẽ diễn ra như sau:
+
+T = 0s: Node a chạy. Sau 1 giây, nó trả về "I'm A".
+
+T = 1s: Hệ thống kích hoạt cùng lúc node b và node c.
+
+T = 2s:
+
+Node c hoàn thành (sau 1s sleep) -> Cập nhật State.
+
+Node b hoàn thành -> Kích hoạt tiếp node b2.
+
+T = 3s:
+
+Node b2 hoàn thành.
+
+Lúc này, hệ thống kiểm tra: "Nhánh c xong chưa? Rồi. Nhánh b2 xong chưa? Rồi." -> Kích hoạt node d.
+
+T = 4s: Node d hoàn thành và kết thúc Graph.
+
+-- async 2 - da async/await
+Đúng vậy, đây chính là mô hình Async (Bất đồng bộ) nhưng ở mức độ nâng cao hơn: Bất đồng bộ có điều kiện (Dynamic Fan-out).
+
+Trong các ví dụ trước, bạn luôn rẽ nhánh cố định. Ở ví dụ này, LangGraph cho phép sơ đồ tự "tư duy" để chọn nhánh chạy song song dựa trên dữ liệu thực tế.
+
+1. Giải thích luồng hoạt động (Workflow)
+Hãy tưởng tượng luồng này như một hệ thống phân loại bưu kiện tự động:
+
+Bước 1 (Node A): Tiếp nhận dữ liệu đầu vào. Tại đây, hệ thống xem xét giá trị của biến which.
+
+Bước 2 (Conditional Routing - Hàm điều hướng):
+
+Hàm route_bc_or_cd đóng vai trò là "người phân luồng".
+
+Nó không chỉ chọn 1 node, mà nó trả về một danh sách các node (Sequence).
+
+Nếu which == "cd": Nó kích hoạt đồng thời Node C và Node D.
+
+Nếu khác: Nó kích hoạt đồng thời Node B và Node C.
+
+Bước 3 (Thực thi song song): Các node được chọn sẽ chạy cùng lúc. Nhờ operator.add trong State, kết quả của chúng sẽ được gộp lại mà không ghi đè lẫn nhau.
+
+Bước 4 (Hội tụ tại Node E): Dù luồng đi theo nhánh nào (BC hay CD), tất cả đều phải hội tụ về Node E. Node E chỉ chạy khi các node nhánh trước đó đã hoàn thành xong nhiệm vụ.
+
+Bước 5 (Kết thúc): Luồng kết thúc tại END.
+
+2. Tại sao gọi đây là Async?
+Nó là Async vì hai lý do:
+
+Về Logic: Tại bước rẽ nhánh, các node (ví dụ B và C) được xử lý độc lập. LangGraph không đợi B xong mới chạy C, mà nó đẩy cả hai vào hàng chờ thực thi cùng lúc.
+
+Về Kỹ thuật: Nếu bạn chuyển hàm __call__ thành async def và dùng await graph.ainvoke(), Python sẽ không chặn (block) luồng chính. Trong khi chờ Node B (đang sleep 1s), nó sẽ tranh thủ xử lý Node C.
+
+
+-- course
+https://github.com/emarco177/langgraph-course/tree/main
+
+#--- install
+poetry init
+
+poetry add python-dotenv black isort langchain langchain-google-genai langgraph langgraph-checkpoint-sqlite
+pip install langchain-google-genai
+poetry add grandalf
+poetry add langchain-tavily
+
+#--- run
+poetry run python main.py
+
+-- test async
+cd core
+poetry run python async.py
+poetry run python async_2.py
+
+#--- git 
+git add .
+git commit -m ""
+
+# 1. Xóa cái 'origin' cũ đang trỏ sang nhà người ta
+git remote remove origin
+# 2. Thêm lại 'origin' trỏ thẳng về repo của bạn
+git remote add origin https://github.com/phongluong8901/langgraph_1.git
+
+git checkout -b memory-sqlite
+git branch
+git push -u origin memory-sqlite
+
+#---gemini ai
+from langchain_google_genai import ChatGoogleGenerativeAI
+llm = ChatGoogleGenerativeAI(model="models/gemini-3.1-flash-lite", temperature=0)
+
+from langchain_ollama import ChatOllama
+llm = ChatOllama(
+    model="qwen3:1.7b", 
+    temperature=0 # Set bằng 0 để câu trả lời mang tính kỹ thuật, chính xác, ít "bay bổng"
+)
+
+#---
