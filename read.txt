@@ -1,4 +1,6 @@
 #--- docs
+-- multi ai agent github: gpt research
+https://github.com/assafelovic/gpt-researcher/tree/main/multi_agents
 --
 1. Luồng làm việc (Workflow)
 Quy trình diễn ra theo 4 giai đoạn chính:
